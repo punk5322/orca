@@ -27,6 +27,7 @@ import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing
 import { appUpdateChecker } from '../src/app-update/app-update-runtime'
 import { SideSafeArea } from '../src/layout/side-safe-area'
 import { useWatchBridge } from '../src/watch/use-watch-bridge'
+import { useHandsFree } from '../src/handsfree/use-hands-free'
 
 // Why: keeps the native splash screen visible until the React tree is mounted
 // and ready to render. Without this the user sees a blank white/black frame
@@ -47,6 +48,7 @@ Notifications.setNotificationHandler({
 // Why: the watch bridge reads the RPC context, which only exists below the provider.
 function WatchBridge() {
   useWatchBridge()
+  useHandsFree()
   return null
 }
 
@@ -239,6 +241,7 @@ export default function RootLayout() {
               options={{ headerShown: false, presentation: 'modal', gestureEnabled: false }}
             />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen name="voice-mode" options={{ headerShown: false }} />
             <Stack.Screen name="terminal-settings" options={{ headerShown: false }} />
             <Stack.Screen name="native-chat-settings" options={{ headerShown: false }} />
             <Stack.Screen name="browser-settings" options={{ headerShown: false }} />

@@ -9,6 +9,8 @@ import {
   TERMINAL_INPUT_SEND_OPTIONS
 } from '../terminal/terminal-send-request'
 import { nativeWatchBridge } from './native-watch-bridge'
+import { onWatchAlert } from './watch-alert-feed'
+import { isHandsFreeActive, setHandsFreeActive } from '../handsfree/hands-free-state'
 import { randomV4Uuid } from '../platform/random-v4-uuid'
 import { sendMobileStructuredAgentSessionMessage } from '../session/mobile-structured-agent-session-send'
 import { structuredSessionOperationId } from '../session/structured-session-operation-id'
@@ -31,6 +33,7 @@ type WatchRequest =
   | { op: 'dictChunk'; id: string; audio: string }
   | { op: 'dictFinish'; id: string }
   | { op: 'dictCancel'; id: string }
+  | { op: 'handsFree'; on: boolean }
 
 type Row = Record<string, unknown>
 
@@ -39,7 +42,7 @@ function str(value: unknown): string | null {
 }
 
 // shortcut: always uses the first paired host; add a host picker on the watch if you pair several.
-async function readyClient(
+export async function readyClient(
   ctx: RpcClientContextValue,
   acquisition: HostClientAcquisition
 ): Promise<{ client: RpcClient; deviceToken: string | null }> {
@@ -63,6 +66,10 @@ async function handle(
   ctx: RpcClientContextValue,
   acquisition: HostClientAcquisition
 ): Promise<Record<string, unknown>> {
+  if (request.op === 'handsFree') {
+    setHandsFreeActive(request.on)
+    return { ok: true, on: isHandsFreeActive() }
+  }
   const { client, deviceToken } = await readyClient(ctx, acquisition)
   if (request.op === 'dictStart') {
     const id = randomV4Uuid()
@@ -199,7 +206,7 @@ function readAgentSessionFence(client: RpcClient, sessionId: string): Promise<nu
   })
 }
 
-async function sendToAgentSession(
+export async function sendToAgentSession(
   client: RpcClient,
   sessionId: string,
   text: string
@@ -245,7 +252,11 @@ export function useWatchBridge(): void {
         await nativeWatchBridge?.respond(id, JSON.stringify(body))
       })()
     })
+    const stopAlerts = onWatchAlert((alert) => {
+      void nativeWatchBridge?.sendToWatch(JSON.stringify({ kind: 'alert', ...alert }))
+    })
     return () => {
+      stopAlerts()
       subscription.remove()
       for (const { hostId } of ctxRef.current.getAllClients()) {
         ctxRef.current.release(hostId, acquisition)

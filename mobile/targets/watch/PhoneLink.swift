@@ -1,10 +1,18 @@
 import Foundation
 import AVFoundation
 import WatchConnectivity
+import WatchKit
 
 struct Worktree: Identifiable, Hashable { let id: String; let name: String }
 // kind is "terminal" or "agent"; ref is the terminal handle or the chat session id.
 struct Terminal: Identifiable, Hashable { var id: String { ref }; let kind: String; let ref: String; let title: String }
+
+struct WatchAlert: Identifiable, Equatable {
+  let id = UUID()
+  let title: String
+  let body: String
+  let worktreeId: String?
+}
 
 struct PhoneError: LocalizedError {
   let message: String
@@ -14,6 +22,7 @@ struct PhoneError: LocalizedError {
 // Why: the phone holds the paired, encrypted host connection; the watch only relays requests to it.
 final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
   static let shared = PhoneLink()
+  @Published var alert: WatchAlert?
 
   override init() {
     super.init()
@@ -42,6 +51,11 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
 
   func send(to target: Terminal, text: String) async throws {
     _ = try await request(["op": "send", "kind": target.kind, "ref": target.ref, "text": text])
+  }
+
+  func setHandsFree(_ on: Bool) async throws -> Bool {
+    let reply = try await request(["op": "handsFree", "on": on])
+    return reply["on"] as? Bool ?? on
   }
 
   func dictationStart() async throws -> String {
@@ -100,6 +114,22 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
           }
         },
         errorHandler: { continuation.resume(throwing: $0) })
+    }
+  }
+
+  // The phone pushes finished-agent events here while this app is open.
+  func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+    guard let json = message["push"] as? String,
+      let parsed = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+      parsed["kind"] as? String == "alert"
+    else { return }
+    let alert = WatchAlert(
+      title: parsed["title"] as? String ?? "Orca",
+      body: parsed["body"] as? String ?? "",
+      worktreeId: parsed["worktreeId"] as? String)
+    DispatchQueue.main.async {
+      self.alert = alert
+      Announcer.shared.announce(alert)
     }
   }
 
@@ -327,5 +357,20 @@ final class DictationSession: ObservableObject {
     continuation = nil
     sender = nil
     onResult = nil
+  }
+}
+
+
+// Taps the wrist and reads the alert aloud. Speech needs an audio route (headphones or the watch
+// speaker), so the haptic and the banner are the dependable part.
+final class Announcer {
+  static let shared = Announcer()
+  private let synthesizer = AVSpeechSynthesizer()
+
+  func announce(_ alert: WatchAlert) {
+    WKInterfaceDevice.current().play(.notification)
+    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+    let spoken = [alert.title, alert.body].filter { !$0.isEmpty }.joined(separator: ". ")
+    synthesizer.speak(AVSpeechUtterance(string: spoken))
   }
 }

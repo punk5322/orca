@@ -2,6 +2,7 @@ import { requestNotificationCatchup } from './push-dismissal-reconciliation'
 import { dismissHostPushNotification } from './push-socket-dismissal'
 import type { DismissNotificationEvent } from './desktop-notification-events'
 import type { RpcClient } from '../transport/rpc-client'
+import { publishDesktopNotification } from '../watch/watch-alert-feed'
 
 export {
   ensureNotificationPermissions,
@@ -23,6 +24,10 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
       // A max watermark asks only which delivered pushes are stale; socket history
       // never becomes a second OS-notification delivery route.
       void requestNotificationCatchup(client, hostId, () => disposed).catch(() => {})
+      return
+    }
+    if (!disposed && event.type === 'notification') {
+      publishDesktopNotification(event)
       return
     }
     if (!disposed && event.type === 'dismiss') {

@@ -6,9 +6,17 @@ struct WorktreeListView: View {
   @State private var worktrees: [Worktree] = []
   @State private var error: String?
   @State private var loading = true
+  @State private var handsFree = false
 
   var body: some View {
     List {
+      // Hands-free mode lives on the phone; this only switches it.
+      Toggle("Hands-free", isOn: $handsFree)
+        .onChange(of: handsFree) { _, on in
+          Task {
+            do { handsFree = try await phone.setHandsFree(on) } catch { self.error = error.localizedDescription }
+          }
+        }
       if let error {
         Text(error).foregroundStyle(.red).font(.footnote)
         Button("Retry") { Task { await load() } }
@@ -19,6 +27,7 @@ struct WorktreeListView: View {
     }
     .overlay { if loading { ProgressView() } }
     .navigationTitle("Orca")
+    .sheet(item: $phone.alert) { alert in AlertView(alert: alert) }
     .task { await load() }
     .refreshable { await load() }
   }
@@ -164,5 +173,30 @@ struct DictateView: View {
       text = ""
       status = "Sent: \(sent)"
     } catch { status = error.localizedDescription }
+  }
+}
+
+
+struct AlertView: View {
+  @Environment(\.dismiss) private var dismiss
+  let alert: WatchAlert
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(spacing: 8) {
+          Text(alert.title).font(.headline)
+          if !alert.body.isEmpty { Text(alert.body).font(.footnote) }
+          if let worktreeId = alert.worktreeId {
+            // Reply goes to the same worktree's chats and terminals, ready to dictate "what's next".
+            NavigationLink("Reply") {
+              TerminalListView(worktree: Worktree(id: worktreeId, name: alert.title))
+            }
+            .tint(.blue)
+          }
+          Button("Dismiss") { dismiss() }
+        }
+      }
+    }
   }
 }

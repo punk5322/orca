@@ -14,6 +14,11 @@ public class OrcaWatchBridgeModule: Module {
       }
     }
 
+    // Fire-and-forget: a push only matters while the watch app is open, so skip it otherwise.
+    AsyncFunction("sendToWatch") { (json: String) in
+      WatchRelay.shared.push(json: json)
+    }
+
     AsyncFunction("respond") { (id: String, json: String) in
       WatchRelay.shared.respond(id: id, json: json)
     }
@@ -35,6 +40,13 @@ final class WatchRelay: NSObject, WCSessionDelegate {
     NSLog("[OrcaWatchBridge] activating WCSession")
     WCSession.default.delegate = self
     WCSession.default.activate()
+  }
+
+  func push(json: String) {
+    guard WCSession.default.activationState == .activated, WCSession.default.isReachable else {
+      return
+    }
+    WCSession.default.sendMessage(["push": json], replyHandler: nil, errorHandler: nil)
   }
 
   func respond(id: String, json: String) {

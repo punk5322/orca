@@ -5,6 +5,7 @@ type WatchRequestEvent = { id: string; json: string }
 
 type NativeWatchBridge = {
   respond: (id: string, json: string) => Promise<void>
+  sendToWatch: (json: string) => Promise<void>
   addListener: (
     event: 'onWatchRequest',
     listener: (event: WatchRequestEvent) => void

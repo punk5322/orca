@@ -1,4 +1,5 @@
 import { AppState, Platform } from 'react-native'
+import { isHandsFreeActive, subscribeHandsFree } from '../handsfree/hands-free-state'
 import { connect, type RpcClient } from './rpc-client'
 import { createStableLogicalRpcClient } from './stable-logical-rpc-client'
 import type { ConnectionLogSink, HostProfile } from './types'
@@ -17,13 +18,20 @@ export function openHostLogicalClient(host: HostProfile, onLog: ConnectionLogSin
   }
 
   const endpointLifecycle = startMobileEndpointLifecycle(logical, host, onLog)
-  endpointLifecycle.setForeground(AppState.currentState === 'active')
+  // Why: hands-free mode keeps the app running in the background on purpose, so the relay must not
+  // be suspended after the usual 30 second grace.
+  const appIsLive = (state: string): boolean => state === 'active' || isHandsFreeActive()
+  endpointLifecycle.setForeground(appIsLive(AppState.currentState))
   const appStateSubscription = AppState.addEventListener('change', (state) => {
-    endpointLifecycle.setForeground(state === 'active')
+    endpointLifecycle.setForeground(appIsLive(state))
+  })
+  const handsFreeSubscription = subscribeHandsFree(() => {
+    endpointLifecycle.setForeground(appIsLive(AppState.currentState))
   })
   const closeLogical = logical.close
   logical.close = () => {
     appStateSubscription.remove()
+    handsFreeSubscription()
     endpointLifecycle.stop()
     closeLogical()
   }

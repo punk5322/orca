@@ -39,12 +39,14 @@ export type MobileStructuredAgentLaunchResult =
 
 function createParamsFor(
   agent: AgentSessionHandleProvider,
-  worktree: string
+  worktree: string,
+  resumeFromSessionId?: string
 ): StructuredAgentSessionCreateParams {
   return structuredAgentSessionCreateParams({
     sessionId: createStructuredAgentSessionId(agent, randomV4Uuid),
     worktree,
     agent,
+    ...(resumeFromSessionId ? { resumeFrom: { providerSessionId: resumeFromSessionId } } : {}),
     randomUuid: randomV4Uuid
   })
 }
@@ -81,7 +83,9 @@ function classifyCreateRefusal(
 export async function createMobileStructuredAgentSession(
   client: RpcClient,
   worktreeId: string,
-  agent: AgentSessionHandleProvider
+  agent: AgentSessionHandleProvider,
+  /** A past Claude or Codex session id to continue in the new chat instead of starting fresh. */
+  resumeFromSessionId?: string
 ): Promise<MobileStructuredAgentLaunchResult> {
   const worktree = `id:${worktreeId}`
   let supportResponse
@@ -122,7 +126,7 @@ export async function createMobileStructuredAgentSession(
     return { kind: 'unsupported', reason: support?.reason }
   }
 
-  const params = createParamsFor(agent, worktree)
+  const params = createParamsFor(agent, worktree, resumeFromSessionId)
   rememberMobileCreatedStructuredSession(params.envelope.sessionId, worktree)
   let response
   try {
