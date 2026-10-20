@@ -11,13 +11,20 @@
 const APS_ENVIRONMENT =
   process.env.ORCA_IOS_APS_ENVIRONMENT === 'production' ? 'production' : 'development'
 
+// Fork signing: the upstream bundle id belongs to Stably's team, so this fork signs under its own.
+// Override with env to build under a different team.
+const IOS_BUNDLE_ID = process.env.ORCA_IOS_BUNDLE_ID ?? 'com.createbase.orca.mobile'
+const APPLE_TEAM_ID = process.env.ORCA_APPLE_TEAM_ID ?? '978AM8AC4M'
+
 module.exports = ({ config }) => ({
   ...config,
   ios: {
     ...config.ios,
+    bundleIdentifier: IOS_BUNDLE_ID,
+    appleTeamId: APPLE_TEAM_ID,
     entitlements: { ...config.ios?.entitlements, 'aps-environment': APS_ENVIRONMENT }
   },
-  plugins: (config.plugins ?? []).map((plugin) =>
+  plugins: [...(config.plugins ?? []), '@bacons/apple-targets'].map((plugin) =>
     plugin === 'expo-notifications'
       ? [
           'expo-notifications',

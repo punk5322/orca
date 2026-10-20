@@ -72,6 +72,7 @@
     "zod": "~4.6.5"
   },
   "devDependencies": {
+    "@bacons/apple-targets": "^5.0.0",
     "@orca/process-host": "link:../src/packages/process-host",
     "@types/markdown-it": "14.1.2",
     "@types/markdown-it-footnote": "^3.0.4",

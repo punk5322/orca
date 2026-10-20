@@ -26,6 +26,7 @@ import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
 import { appUpdateChecker } from '../src/app-update/app-update-runtime'
 import { SideSafeArea } from '../src/layout/side-safe-area'
+import { useWatchBridge } from '../src/watch/use-watch-bridge'
 
 // Why: keeps the native splash screen visible until the React tree is mounted
 // and ready to render. Without this the user sees a blank white/black frame
@@ -42,6 +43,12 @@ void registerPushDismissalTask().catch(() => {})
 Notifications.setNotificationHandler({
   handleNotification: foregroundNotificationBehavior
 })
+
+// Why: the watch bridge reads the RPC context, which only exists below the provider.
+function WatchBridge() {
+  useWatchBridge()
+  return null
+}
 
 export default function RootLayout() {
   const router = useRouter()
@@ -199,6 +206,7 @@ export default function RootLayout() {
 
   return (
     <RpcClientProvider>
+      <WatchBridge />
       <View style={styles.root} onLayout={onNavigatorLayout}>
         <StatusBar style="light" />
         <SideSafeArea>
