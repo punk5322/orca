@@ -1,6 +1,12 @@
 import type { RpcClient } from '../transport/rpc-client'
 
-export type VoiceProject = { id: string; repo: string; name: string; path: string | null }
+export type VoiceProject = {
+  id: string
+  repo: string
+  name: string
+  path: string | null
+  isMain: boolean
+}
 export type VoicePastSession = {
   sessionId: string
   agent: 'claude' | 'codex'
@@ -28,7 +34,13 @@ export async function listProjects(client: RpcClient): Promise<VoiceProject[]> {
       return []
     }
     return [
-      { id, repo: str(row.repo) ?? 'Other', name: str(row.displayName) ?? id, path: str(row.path) }
+      {
+        id,
+        repo: str(row.repo) ?? 'Other',
+        name: str(row.displayName) ?? id,
+        path: str(row.path),
+        isMain: row.isMainWorktree === true
+      }
     ]
   })
 }

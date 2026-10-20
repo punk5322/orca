@@ -170,6 +170,14 @@ final class HandsFreeAudio: NSObject, AVSpeechSynthesizerDelegate {
     try? AVAudioSession.sharedInstance().setActive(true)
     if !engine.isRunning { try? engine.start() }
     if !player.isPlaying { player.play() }
+    // A configuration change can leave the tap on the old format, so put it back on the new one.
+    lock.lock()
+    let hadTap = tapInstalled
+    lock.unlock()
+    if hadTap {
+      removeTapIfInstalled()
+      try? ensureTap()
+    }
   }
 
   private func configureSession(ducking: Bool) throws {
@@ -323,7 +331,10 @@ final class HandsFreeAudio: NSObject, AVSpeechSynthesizerDelegate {
     lock.unlock()
     guard !installed else { return }
     let input = engine.inputNode
-    let format = input.outputFormat(forBus: 0)
+    // Why: installTap asserts the format matches the hardware's. After speech the session can
+    // change the microphone's rate (built-in vs Bluetooth), and the engine-side outputFormat lags
+    // that, so ask for the hardware-side format.
+    let format = input.inputFormat(forBus: 0)
     // Why: an input that is not ready reports zero rate or channels, and installing a tap with that
     // format throws an Objective-C exception that cannot be caught, so check it first.
     guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -413,6 +424,11 @@ final class HandsFreeAudio: NSObject, AVSpeechSynthesizerDelegate {
   }
 
   private func handle(_ buffer: AVAudioPCMBuffer) {
+    // The route can change mid-listen; follow the buffers' own format rather than the one the
+    // converter was built for.
+    if converter == nil || converter?.inputFormat != buffer.format {
+      converter = AVAudioConverter(from: buffer.format, to: target)
+    }
     guard let converter else { return }
     let capacity =
       AVAudioFrameCount(Double(buffer.frameLength) * HandsFreeAudio.rate / buffer.format.sampleRate)

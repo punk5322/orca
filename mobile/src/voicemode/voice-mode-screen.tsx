@@ -15,12 +15,16 @@ import {
   type VoiceProject
 } from './voice-targets'
 import { formatTimeAgo } from '../worktree/agent-row-display'
+import { acquireAudio } from '../handsfree/audio-lease'
+import { nativeHandsFree } from '../handsfree/native-hands-free'
+import { runTaskIntake } from './task-intake'
+import { setVoiceModeActive } from './voice-mode-state'
 import { VoiceConversation, type VoiceState } from './voice-conversation'
 import { VoiceVisualizer } from './voice-visualizer'
 import { createMobileStructuredAgentSession } from '../session/mobile-structured-agent-session-launch'
 import type { AgentSessionHandleProvider } from '../../../src/shared/agent-session-provider-handle'
 
-type Step = 'projects' | 'chats' | 'live'
+type Step = 'projects' | 'chats' | 'live' | 'task'
 type Turn = { id: number; who: 'you' | 'agent'; text: string }
 
 const CREATE_CHAT_TIMEOUT_MS = 40_000
@@ -53,6 +57,9 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState<string | null>(null)
+  const [taskState, setTaskState] = useState<VoiceState>('speaking')
+  const [taskLines, setTaskLines] = useState<{ label: string; text: string }[]>([])
+  const taskAbort = useRef<AbortController | null>(null)
 
   const conversation = useRef<VoiceConversation | null>(null)
   const [voiceState, setVoiceState] = useState<VoiceState>('idle')
@@ -173,7 +180,84 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
     }
   }
 
+  // "New task by voice": asks which project and what the task is, starts a Claude chat in that
+  // repo with the task as its first message, then carries on as a live conversation.
+  const startTask = async () => {
+    if (taskAbort.current) {
+      return
+    }
+    const controller = new AbortController()
+    taskAbort.current = controller
+    setStep('task')
+    setTaskLines([])
+    setTaskState('speaking')
+    setNotice(null)
+    let release: () => Promise<void> = async () => {}
+    try {
+      setVoiceModeActive(true)
+      release = await acquireAudio()
+      const { client } = await readyClient(ctxRef.current, acquisition)
+      const intake = await runTaskIntake(client, projects, {
+        onState: setTaskState,
+        onHeard: (label, text) => setTaskLines((lines) => [...lines, { label, text }]),
+        signal: controller.signal
+      })
+      if (!intake) {
+        setStep('projects')
+        return
+      }
+      const created = await createMobileStructuredAgentSession(client, intake.target.id, 'claude')
+      if (created.kind !== 'created') {
+        throw new Error(
+          created.kind === 'unsupported'
+            ? "That project can't host a chat. Open it on the desktop first."
+            : created.message
+        )
+      }
+      setProject(intake.target)
+      setChat({ sessionId: created.sessionId, title: 'New task', isActive: true })
+      setTurns([])
+      setStep('live')
+      setRunning(true)
+      const next = new VoiceConversation(
+        () => ctxRef.current,
+        created.sessionId,
+        {
+          onState: setVoiceState,
+          onUserText: (text) => addTurn('you', text),
+          onReplyText: (text) => addTurn('agent', text),
+          onNotice: setNotice,
+          onEnded: () => setRunning(false)
+        },
+        intake.task
+      )
+      conversation.current = next
+      await next.start()
+    } catch (failure) {
+      if (!controller.signal.aborted) {
+        setError(failure instanceof Error ? failure.message : 'Could not start the task.')
+      }
+      setStep('projects')
+    } finally {
+      taskAbort.current = null
+      await release().catch(() => undefined)
+      if (!conversation.current) {
+        setVoiceModeActive(false)
+      }
+    }
+  }
+
+  const cancelTask = async () => {
+    taskAbort.current?.abort()
+    await nativeHandsFree?.stopListening().catch(() => undefined)
+    await nativeHandsFree?.cancelSpeech().catch(() => undefined)
+  }
+
   const back = async () => {
+    if (step === 'task') {
+      await cancelTask()
+      return
+    }
     if (step === 'live') {
       await stopConversation()
       setStep('chats')
@@ -209,7 +293,13 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
   }, [projects])
 
   const title =
-    step === 'projects' ? 'Voice mode' : step === 'chats' ? (project?.repo ?? 'Chats') : 'Live'
+    step === 'projects'
+      ? 'Voice mode'
+      : step === 'chats'
+        ? (project?.repo ?? 'Chats')
+        : step === 'task'
+          ? 'New task'
+          : 'Live'
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
@@ -225,7 +315,39 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
         <Text style={styles.heading}>{title}</Text>
       </View>
 
-      {step !== 'live' ? (
+      {step === 'task' ? (
+        <View style={styles.live}>
+          <View style={styles.visual}>
+            <VoiceVisualizer state={taskState} />
+            <Text style={styles.stateLabel}>
+              {taskState === 'speaking' ? 'Speaking…' : 'Listening…'}
+            </Text>
+          </View>
+          <ScrollView style={styles.transcript} contentContainerStyle={styles.transcriptContent}>
+            {taskLines.map((line, index) => (
+              <View key={index} style={[styles.bubble, styles.youBubble]}>
+                <Text style={styles.who}>{line.label}</Text>
+                <Text style={styles.line}>{line.text || '(nothing heard)'}</Text>
+              </View>
+            ))}
+          </ScrollView>
+          <View style={[styles.controls, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              style={({ pressed }) => [
+                styles.mainButton,
+                styles.stopButton,
+                pressed && styles.pressed
+              ]}
+              onPress={() => void cancelTask()}
+            >
+              <Square size={28} color="#fff" fill="#fff" />
+            </Pressable>
+            <Text style={styles.hint}>Say "cancel" or tap to stop</Text>
+          </View>
+        </View>
+      ) : step !== 'live' ? (
         <ScrollView
           contentContainerStyle={{ paddingBottom: insets.bottom + spacing.lg }}
           showsVerticalScrollIndicator={false}
@@ -239,6 +361,19 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
             <ActivityIndicator style={styles.spinner} color={colors.textSecondary} />
           ) : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          {step === 'projects' && projects.length > 0 ? (
+            <View style={styles.group}>
+              <View style={styles.section}>
+                <Row
+                  label="New task by voice"
+                  first
+                  icon={<Mic size={16} color={colors.textSecondary} />}
+                  onPress={() => void startTask()}
+                />
+              </View>
+            </View>
+          ) : null}
 
           {step === 'projects'
             ? grouped.map(([repo, entries]) => (

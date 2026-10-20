@@ -67,7 +67,9 @@ export class VoiceConversation {
   constructor(
     private readonly getCtx: () => RpcClientContextValue,
     private readonly sessionId: string,
-    private readonly callbacks: VoiceCallbacks
+    private readonly callbacks: VoiceCallbacks,
+    /** A message to send first instead of listening, e.g. the task just dictated. */
+    private readonly firstMessage?: string
   ) {}
 
   async start(): Promise<void> {
@@ -131,14 +133,21 @@ export class VoiceConversation {
     }
     let emptyRounds = 0
     let firstMessage = true
+    let readyMade = this.firstMessage
     while (this.running) {
-      this.callbacks.onState('listening')
       let heard: string
-      try {
-        heard = await listenAndTranscribe(client)
-      } catch (error) {
-        await this.fail(error)
-        return
+      const useReadyMade = readyMade !== undefined
+      if (useReadyMade) {
+        heard = readyMade as string
+        readyMade = undefined
+      } else {
+        this.callbacks.onState('listening')
+        try {
+          heard = await listenAndTranscribe(client)
+        } catch (error) {
+          await this.fail(error)
+          return
+        }
       }
       if (!this.running) {
         return
@@ -154,13 +163,13 @@ export class VoiceConversation {
         continue
       }
       emptyRounds = 0
-      if (END_PHRASE.test(heard)) {
+      if (!useReadyMade && END_PHRASE.test(heard)) {
         await this.say('Goodbye.')
         await this.stop()
         this.callbacks.onEnded()
         return
       }
-      if (CANCEL_PHRASE.test(heard)) {
+      if (!useReadyMade && CANCEL_PHRASE.test(heard)) {
         continue
       }
       this.callbacks.onUserText(heard)
