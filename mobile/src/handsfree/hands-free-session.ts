@@ -173,7 +173,8 @@ async function converse(
 /** Turns hands-free mode on; returns what turns it off. */
 export function startHandsFree(
   getCtx: () => RpcClientContextValue,
-  onFatal: (message: string) => void
+  onFatal: (message: string) => void,
+  onReady: () => void
 ): () => void {
   const native = nativeHandsFree
   const acquisition: HostClientAcquisition = {}
@@ -205,6 +206,7 @@ export function startHandsFree(
       stopAlerts = onWatchAlert((alert) => {
         queue = queue.then(() => converse(alert, getCtx, acquisition))
       })
+      onReady()
       await native.speak('Hands-free is on.', false)
     } catch (error) {
       await release().catch(() => undefined)

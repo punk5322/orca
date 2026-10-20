@@ -14,7 +14,15 @@ export async function acquireAudio(): Promise<() => Promise<void>> {
     if (!(await native.requestPermission())) {
       throw new Error('Microphone access is off for Orca.')
     }
-    await native.start()
+    try {
+      await native.start()
+    } catch {
+      // Why: iOS refuses to bring up the microphone for an app that is not on screen, and says so
+      // with an opaque audio error. This is the usual cause, so say it plainly.
+      throw new Error(
+        "iOS only lets Orca start the microphone while Orca is open on your phone's screen. Open Orca, then turn hands-free on."
+      )
+    }
   }
   leases += 1
   let released = false

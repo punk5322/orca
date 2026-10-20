@@ -10,7 +10,12 @@ import {
 } from '../terminal/terminal-send-request'
 import { nativeWatchBridge } from './native-watch-bridge'
 import { onWatchAlert } from './watch-alert-feed'
-import { isHandsFreeActive, setHandsFreeActive } from '../handsfree/hands-free-state'
+import {
+  handsFreeFailure,
+  isHandsFreeActive,
+  setHandsFreeActive,
+  waitForHandsFreeStart
+} from '../handsfree/hands-free-state'
 import { randomV4Uuid } from '../platform/random-v4-uuid'
 import { sendMobileStructuredAgentSessionMessage } from '../session/mobile-structured-agent-session-send'
 import { structuredSessionOperationId } from '../session/structured-session-operation-id'
@@ -21,6 +26,7 @@ import { structuredSessionOperationId } from '../session/structured-session-oper
 const CONNECT_WAIT_MS = 10_000
 const POLL_MS = 250
 const SEND_TIMEOUT_MS = 15_000
+const HANDS_FREE_START_WAIT_MS = 15_000
 const FENCE_WAIT_MS = 8_000
 const DICTATION_SAMPLE_RATE = 16_000
 const DICTATION_FINISH_TIMEOUT_MS = 30_000
@@ -33,7 +39,7 @@ type WatchRequest =
   | { op: 'dictChunk'; id: string; audio: string }
   | { op: 'dictFinish'; id: string }
   | { op: 'dictCancel'; id: string }
-  | { op: 'handsFree'; on: boolean }
+  | { op: 'handsFree'; on?: boolean }
 
 type Row = Record<string, unknown>
 
@@ -67,7 +73,21 @@ async function handle(
   acquisition: HostClientAcquisition
 ): Promise<Record<string, unknown>> {
   if (request.op === 'handsFree') {
+    if (request.on === undefined) {
+      return { ok: true, on: isHandsFreeActive() }
+    }
     setHandsFreeActive(request.on)
+    if (request.on) {
+      // Why: turning it on can fail (iOS may refuse to start audio from the background), and the
+      // watch should show that rather than a switch that looks on.
+      const outcome = await waitForHandsFreeStart(HANDS_FREE_START_WAIT_MS)
+      if (outcome === 'failed') {
+        throw new Error(handsFreeFailure() ?? 'Could not start hands-free mode.')
+      }
+      if (outcome === 'starting') {
+        throw new Error('Hands-free is taking too long to start. Open Orca on your phone.')
+      }
+    }
     return { ok: true, on: isHandsFreeActive() }
   }
   const { client, deviceToken } = await readyClient(ctx, acquisition)

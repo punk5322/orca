@@ -7,16 +7,30 @@ struct WorktreeListView: View {
   @State private var error: String?
   @State private var loading = true
   @State private var handsFree = false
+  @State private var handsFreeBusy = false
 
   var body: some View {
     List {
-      // Hands-free mode lives on the phone; this only switches it.
-      Toggle("Hands-free", isOn: $handsFree)
-        .onChange(of: handsFree) { _, on in
-          Task {
-            do { handsFree = try await phone.setHandsFree(on) } catch { self.error = error.localizedDescription }
-          }
-        }
+      // Hands-free mode lives on the phone; this switches it and shows its real state.
+      Toggle(
+        "Hands-free",
+        isOn: Binding(
+          get: { handsFree },
+          set: { on in
+            handsFree = on
+            Task {
+              handsFreeBusy = true
+              defer { handsFreeBusy = false }
+              do {
+                handsFree = try await phone.handsFree(on)
+              } catch {
+                handsFree = !on
+                self.error = error.localizedDescription
+              }
+            }
+          })
+      )
+      .disabled(handsFreeBusy)
       if let error {
         Text(error).foregroundStyle(.red).font(.footnote)
         Button("Retry") { Task { await load() } }
@@ -29,6 +43,7 @@ struct WorktreeListView: View {
     .navigationTitle("Orca")
     .sheet(item: $phone.alert) { alert in AlertView(alert: alert) }
     .task { await load() }
+    .task { if let on = try? await phone.handsFree(nil) { handsFree = on } }
     .refreshable { await load() }
   }
 

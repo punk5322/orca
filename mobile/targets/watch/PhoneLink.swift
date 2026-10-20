@@ -53,9 +53,13 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
     _ = try await request(["op": "send", "kind": target.kind, "ref": target.ref, "text": text])
   }
 
-  func setHandsFree(_ on: Bool) async throws -> Bool {
-    let reply = try await request(["op": "handsFree", "on": on])
-    return reply["on"] as? Bool ?? on
+  /// Turns hands-free on or off, or with nil only reports whether it is on. Throws with the
+  /// phone's reason if it could not start.
+  func handsFree(_ on: Bool?) async throws -> Bool {
+    var body: [String: Any] = ["op": "handsFree"]
+    if let on { body["on"] = on }
+    let reply = try await request(body)
+    return reply["on"] as? Bool ?? (on ?? false)
   }
 
   func dictationStart() async throws -> String {

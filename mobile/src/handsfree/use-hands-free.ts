@@ -1,6 +1,12 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { useRpcClientContext } from '../transport/client-context'
-import { isHandsFreeActive, setHandsFreeActive, subscribeHandsFree } from './hands-free-state'
+import {
+  isHandsFreeActive,
+  reportHandsFreeFailed,
+  reportHandsFreeReady,
+  setHandsFreeActive,
+  subscribeHandsFree
+} from './hands-free-state'
 import { startHandsFree } from './hands-free-session'
 
 export function useHandsFreeActive(): boolean {
@@ -20,7 +26,11 @@ export function useHandsFree(): void {
     }
     return startHandsFree(
       () => ctxRef.current,
-      () => setHandsFreeActive(false)
+      (message) => {
+        reportHandsFreeFailed(message)
+        setHandsFreeActive(false)
+      },
+      reportHandsFreeReady
     )
   }, [active])
 }
