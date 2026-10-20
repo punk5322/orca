@@ -3,7 +3,7 @@ import { rankRepos, repoChoices, scoreRepo } from './repo-match'
 import type { VoiceProject } from './voice-targets'
 
 function project(repo: string, name: string, isMain: boolean): VoiceProject {
-  return { id: `${repo}:${name}`, repo, name, path: `/code/${repo}`, isMain }
+  return { id: `${repo}:${name}`, repo, name, path: `/code/${repo}`, isMain, repoId: repo }
 }
 
 describe('matching a spoken project name', () => {

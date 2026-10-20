@@ -7,6 +7,7 @@ import { acquireAudio } from '../handsfree/audio-lease'
 import { nativeHandsFree } from '../handsfree/native-hands-free'
 import { ChatTracker } from './chat-tracker'
 import { setVoiceModeActive } from './voice-mode-state'
+import { beginActivity, endActivity, updateActivity } from '../handsfree/live-activity'
 import { isReadMore, moreOfReply, spokenReply } from './reply-speech'
 import {
   approvalSpeech,
@@ -64,6 +65,7 @@ export class VoiceConversation {
     this.callbacks.onNotice(null)
     try {
       this.release = await acquireAudio()
+      beginActivity('voice', 'Voice mode')
       const { client } = await readyClient(this.getCtx(), this.acquisition)
       this.client = client
       this.tracker = new ChatTracker(client, this.sessionId)
@@ -93,6 +95,7 @@ export class VoiceConversation {
       ctx.release(hostId, this.acquisition)
     }
     await this.release().catch(() => undefined)
+    endActivity('voice')
     setVoiceModeActive(false)
     this.callbacks.onState('idle')
   }
@@ -103,8 +106,16 @@ export class VoiceConversation {
     this.callbacks.onEnded()
   }
 
+  // Also drives the lock screen card, so the state shown there is always the one on screen.
+  private emitState(state: VoiceState): void {
+    this.callbacks.onState(state)
+    if (state !== 'idle') {
+      updateActivity('voice', state)
+    }
+  }
+
   private async say(text: string, interruptible = false): Promise<void> {
-    this.callbacks.onState('speaking')
+    this.emitState('speaking')
     await nativeHandsFree?.speak(text, interruptible)
   }
 
@@ -125,7 +136,7 @@ export class VoiceConversation {
     let ask = approvalSpeech(prompt)
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await this.say(ask)
-      this.callbacks.onState('listening')
+      this.emitState('listening')
       const heard = await listenAndTranscribe(client)
       if (!this.running) {
         return false
@@ -179,7 +190,7 @@ export class VoiceConversation {
         heard = readyMade as string
         readyMade = undefined
       } else {
-        this.callbacks.onState('listening')
+        this.emitState('listening')
         try {
           heard = await listenAndTranscribe(client)
         } catch (error) {
@@ -217,7 +228,8 @@ export class VoiceConversation {
         continue
       }
       this.callbacks.onUserText(heard)
-      this.callbacks.onState('thinking')
+      updateActivity('voice', 'thinking', heard)
+      this.emitState('thinking')
       try {
         const after = tracker.mark()
         await sendToAgentSession(
@@ -236,7 +248,7 @@ export class VoiceConversation {
           if (!(await this.resolveApproval(client, tracker, reply.prompt))) {
             break
           }
-          this.callbacks.onState('thinking')
+          this.emitState('thinking')
           reply = await tracker.reply(after, this.abort.signal)
         }
         if (!this.running) {
@@ -244,6 +256,7 @@ export class VoiceConversation {
         }
         if (reply.kind === 'text') {
           this.callbacks.onReplyText(reply.text)
+          updateActivity('voice', 'speaking', reply.text)
           const { spoken, rest } = spokenReply(reply.text)
           this.unread = rest
           // Interruptible: talking over it, or a play/pause press, cuts in and becomes the reply.

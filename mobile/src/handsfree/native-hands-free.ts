@@ -11,6 +11,9 @@ export type InstalledVoice = {
 }
 
 type NativeHandsFree = {
+  activityStart: (title: string, phase: string, detail: string) => Promise<void>
+  activityUpdate: (phase: string, detail: string) => Promise<void>
+  activityEnd: () => Promise<void>
   getRate: () => Promise<number>
   setRate: (value: number) => Promise<void>
   voices: () => Promise<InstalledVoice[]>

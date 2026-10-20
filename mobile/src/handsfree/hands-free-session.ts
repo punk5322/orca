@@ -10,6 +10,7 @@ import {
 } from '../watch/watch-alert-feed'
 import { nativeHandsFree } from './native-hands-free'
 import { acquireAudio } from './audio-lease'
+import { beginActivity, endActivity, updateActivity } from './live-activity'
 import { isVoiceModeActive } from '../voicemode/voice-mode-state'
 
 const DICTATION_SAMPLE_RATE = 16_000
@@ -145,8 +146,11 @@ async function converse(
   try {
     const { client } = await readyClient(getCtx(), acquisition)
     // Only this first prompt can be interrupted; the confirmations play through.
+    updateActivity('hands-free', 'speaking', alert.title)
     await say(`${spokenSummary(alert)} What's next?`, true)
+    updateActivity('hands-free', 'listening')
     const heard = await listenAndTranscribe(client)
+    updateActivity('hands-free', 'thinking', heard)
     if (!heard) {
       await say("I didn't hear anything.")
       return
@@ -167,6 +171,8 @@ async function converse(
     await say(error instanceof Error ? error.message : 'Something went wrong.').catch(
       () => undefined
     )
+  } finally {
+    updateActivity('hands-free', 'idle', '')
   }
 }
 
@@ -207,14 +213,17 @@ export function startHandsFree(
         queue = queue.then(() => converse(alert, getCtx, acquisition))
       })
       onReady()
+      beginActivity('hands-free', 'Hands-free', 'Waiting for agents')
       await native.speak('Hands-free is on.', false)
     } catch (error) {
+      endActivity('hands-free')
       await release().catch(() => undefined)
       onFatal(error instanceof Error ? error.message : 'Could not start hands-free mode.')
     }
   })()
 
   return () => {
+    endActivity('hands-free')
     stopped = true
     stopAlerts()
     unsubscribe()

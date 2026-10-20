@@ -21,6 +21,18 @@ public class OrcaHandsFreeModule: Module {
         AVAudioSession.sharedInstance().requestRecordPermission { promise.resolve($0) }
       }
     }
+    // The lock screen card. A no-op where Live Activities are unavailable.
+    AsyncFunction("activityStart") { (title: String, phase: String, detail: String) in
+      if #available(iOS 16.2, *) {
+        LiveActivityControl.start(title: title, phase: phase, detail: detail)
+      }
+    }
+    AsyncFunction("activityUpdate") { (phase: String, detail: String) in
+      if #available(iOS 16.2, *) { LiveActivityControl.update(phase: phase, detail: detail) }
+    }
+    AsyncFunction("activityEnd") {
+      if #available(iOS 16.2, *) { LiveActivityControl.end() }
+    }
     AsyncFunction("getRate") { () -> Double in HandsFreeAudio.savedRate() }
     AsyncFunction("setRate") { (value: Double) in HandsFreeAudio.saveRate(value) }
     AsyncFunction("voices") { () -> [[String: String]] in HandsFreeAudio.voiceList() }

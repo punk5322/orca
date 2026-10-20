@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { ChevronLeft, ChevronRight, Mic, Plus, Square } from 'lucide-react-native'
+import { AudioLines, ChevronLeft, ChevronRight, Mic, Plus, Square } from 'lucide-react-native'
 import { colors, spacing, typography } from '../theme/mobile-theme'
 import { useRpcClientContext } from '../transport/client-context'
 import type { HostClientAcquisition } from '../transport/host-client-acquisition-registry'
 import { readyClient } from '../watch/use-watch-bridge'
 import {
+  createTaskWorkspace,
   listChats,
   listPastSessions,
   listProjects,
@@ -18,13 +19,15 @@ import { formatTimeAgo } from '../worktree/agent-row-display'
 import { acquireAudio } from '../handsfree/audio-lease'
 import { nativeHandsFree } from '../handsfree/native-hands-free'
 import { runTaskIntake } from './task-intake'
+import { MemoTriageView } from './memo-triage-view'
+import { getBranchPerTask } from './voice-preferences'
 import { setVoiceModeActive } from './voice-mode-state'
 import { VoiceConversation, type VoiceState } from './voice-conversation'
 import { VoiceVisualizer } from './voice-visualizer'
 import { createMobileStructuredAgentSession } from '../session/mobile-structured-agent-session-launch'
 import type { AgentSessionHandleProvider } from '../../../src/shared/agent-session-provider-handle'
 
-type Step = 'projects' | 'chats' | 'live' | 'task'
+type Step = 'projects' | 'chats' | 'live' | 'task' | 'memos'
 type Turn = { id: number; who: 'you' | 'agent'; text: string }
 
 const CREATE_CHAT_TIMEOUT_MS = 40_000
@@ -223,7 +226,14 @@ export function VoiceModeScreen({
         setStep('projects')
         return
       }
-      const created = await createMobileStructuredAgentSession(client, intake.target.id, 'claude')
+      let target = intake.target
+      if (await getBranchPerTask()) {
+        // Opt-in: give the task its own branch so parallel tasks in one repo do not collide.
+        setTaskState('speaking')
+        await nativeHandsFree?.speak('Creating a branch for it.', false)
+        target = await createTaskWorkspace(client, intake.target, intake.task)
+      }
+      const created = await createMobileStructuredAgentSession(client, target.id, 'claude')
       if (created.kind !== 'created') {
         throw new Error(
           created.kind === 'unsupported'
@@ -231,7 +241,7 @@ export function VoiceModeScreen({
             : created.message
         )
       }
-      setProject(intake.target)
+      setProject(target)
       setChat({ sessionId: created.sessionId, title: 'New task', isActive: true })
       setTurns([])
       setStep('live')
@@ -274,6 +284,10 @@ export function VoiceModeScreen({
   }
 
   const back = async () => {
+    if (step === 'memos') {
+      setStep('projects')
+      return
+    }
     if (step === 'task') {
       await cancelTask()
       return
@@ -319,7 +333,9 @@ export function VoiceModeScreen({
         ? (project?.repo ?? 'Chats')
         : step === 'task'
           ? 'New task'
-          : 'Live'
+          : step === 'memos'
+            ? 'Voice memos'
+            : 'Live'
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
@@ -335,7 +351,14 @@ export function VoiceModeScreen({
         <Text style={styles.heading}>{title}</Text>
       </View>
 
-      {step === 'task' ? (
+      {step === 'memos' ? (
+        <MemoTriageView
+          key="memos"
+          projects={projects}
+          getCtx={() => ctxRef.current}
+          acquisition={acquisition}
+        />
+      ) : step === 'task' ? (
         <View style={styles.live}>
           <View style={styles.visual}>
             <VoiceVisualizer state={taskState} />
@@ -390,6 +413,12 @@ export function VoiceModeScreen({
                   first
                   icon={<Mic size={16} color={colors.textSecondary} />}
                   onPress={() => void startTask()}
+                />
+                <Row
+                  label="Process voice memos"
+                  first={false}
+                  icon={<AudioLines size={16} color={colors.textSecondary} />}
+                  onPress={() => setStep('memos')}
                 />
               </View>
             </View>

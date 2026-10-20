@@ -94,6 +94,9 @@ struct DictateView: View {
   @EnvironmentObject var phone: PhoneLink
   @StateObject private var dictation = DictationSession()
   let terminal: Terminal
+  // One-tap answers for the things said most often to an agent; chats only, since a raw terminal
+  // would run the words as a command.
+  private static let quickReplies = ["Yes", "Continue", "Run the tests", "Stop and summarize"]
   @State private var text = ""
   @State private var status: String?
   @State private var sending = false
@@ -116,6 +119,16 @@ struct DictateView: View {
               Image(systemName: "mic.fill").font(.system(size: 36)).frame(maxWidth: .infinity, minHeight: 70)
             }
             .tint(.blue)
+            if terminal.kind == "agent" {
+              ForEach(Self.quickReplies, id: \.self) { reply in
+                Button(reply) {
+                  text = reply
+                  Task { await send() }
+                }
+                .font(.footnote)
+                .disabled(sending)
+              }
+            }
             if dictationUnavailable { TextField("Dictate", text: $text) }
           case .starting:
             ProgressView()

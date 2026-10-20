@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
-import { Check, ChevronDown, ChevronRight, Gauge, Headphones, Volume2 } from 'lucide-react-native'
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Gauge,
+  GitBranch,
+  Headphones,
+  Volume2
+} from 'lucide-react-native'
 import { colors, spacing, typography } from '../theme/mobile-theme'
 import { nativeHandsFree, type InstalledVoice } from './native-hands-free'
 import { setHandsFreeActive } from './hands-free-state'
 import { useHandsFreeActive } from './use-hands-free'
+import { getBranchPerTask, setBranchPerTask } from '../voicemode/voice-preferences'
 
 const ACCENTS: Record<string, string> = {
   'en-GB': 'British',
@@ -33,11 +42,13 @@ export function HandsFreeToggleCard() {
   const [voices, setVoices] = useState<InstalledVoice[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [rate, setRate] = useState(1.05)
+  const [branchPerTask, setBranch] = useState(false)
 
   useEffect(() => {
     void nativeHandsFree?.voices().then(setVoices)
     void nativeHandsFree?.currentVoice().then(setSelected)
     void nativeHandsFree?.getRate().then(setRate)
+    void getBranchPerTask().then(setBranch)
   }, [])
 
   if (!nativeHandsFree) {
@@ -72,6 +83,19 @@ export function HandsFreeToggleCard() {
           </Text>
           <Chevron size={16} color={colors.textMuted} />
         </Pressable>
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <GitBranch size={16} color={colors.textSecondary} />
+          <Text style={styles.rowLabel}>New branch per task</Text>
+          <Switch
+            accessibilityLabel="New branch per task"
+            value={branchPerTask}
+            onValueChange={(on) => {
+              setBranch(on)
+              void setBranchPerTask(on)
+            }}
+          />
+        </View>
         <View style={styles.separator} />
         <Pressable
           accessibilityRole="button"

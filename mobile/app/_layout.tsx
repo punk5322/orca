@@ -28,7 +28,8 @@ import { appUpdateChecker } from '../src/app-update/app-update-runtime'
 import { SideSafeArea } from '../src/layout/side-safe-area'
 import { useWatchBridge } from '../src/watch/use-watch-bridge'
 import { useHandsFree } from '../src/handsfree/use-hands-free'
-import { voiceLinkRoute } from '../src/voicemode/voice-links'
+import { isHandsFreeOffLink, voiceLinkRoute } from '../src/voicemode/voice-links'
+import { setHandsFreeActive } from '../src/handsfree/hands-free-state'
 
 // Why: keeps the native splash screen visible until the React tree is mounted
 // and ready to render. Without this the user sees a blank white/black frame
@@ -98,6 +99,13 @@ export default function RootLayout() {
         // `orca://pair` route underneath this screen; replacing keeps cancel
         // and edge-back from revealing the router error page.
         router.replace({ pathname: '/pair-confirm', params: { code } })
+        return
+      }
+      // The Stop button on the lock screen card: turn hands-free off, and leave any voice screen so
+      // that conversation ends too.
+      if (isHandsFreeOffLink(url)) {
+        setHandsFreeActive(false)
+        router.replace('/')
         return
       }
       // orca://new-task and orca://voice-mode, from a Siri or Shortcuts launch.

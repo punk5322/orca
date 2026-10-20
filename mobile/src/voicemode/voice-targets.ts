@@ -1,4 +1,6 @@
 import type { RpcClient } from '../transport/rpc-client'
+import { randomV4Uuid } from '../platform/random-v4-uuid'
+import { workspaceNameForTask, workspaceTitleForTask } from './task-naming'
 
 export type VoiceProject = {
   id: string
@@ -6,6 +8,7 @@ export type VoiceProject = {
   name: string
   path: string | null
   isMain: boolean
+  repoId: string | null
 }
 export type VoicePastSession = {
   sessionId: string
@@ -39,7 +42,8 @@ export async function listProjects(client: RpcClient): Promise<VoiceProject[]> {
         repo: str(row.repo) ?? 'Other',
         name: str(row.displayName) ?? id,
         path: str(row.path),
-        isMain: row.isMainWorktree === true
+        isMain: row.isMainWorktree === true,
+        repoId: str(row.repoId)
       }
     ]
   })
@@ -114,5 +118,47 @@ export async function listPastSessions(
       .slice(0, PAST_SESSION_SHOWN)
   } catch {
     return []
+  }
+}
+
+const CREATE_WORKSPACE_TIMEOUT_MS = 90_000
+
+/** A new branch and workspace for one dictated task, in the same repo as `project`. */
+export async function createTaskWorkspace(
+  client: RpcClient,
+  project: VoiceProject,
+  task: string
+): Promise<VoiceProject> {
+  if (!project.repoId) {
+    throw new Error('Could not tell which repo to branch in.')
+  }
+  const suffix = randomV4Uuid().slice(0, 4)
+  const reply = await client.sendRequest(
+    'worktree.create',
+    {
+      repo: `id:${project.repoId}`,
+      name: workspaceNameForTask(task, suffix),
+      displayName: workspaceTitleForTask(task),
+      nameWasGenerated: false,
+      // Why: a retry after a lost reply must not make a second branch.
+      clientMutationId: randomV4Uuid()
+    },
+    { timeoutMs: CREATE_WORKSPACE_TIMEOUT_MS }
+  )
+  if (!reply.ok) {
+    throw new Error(reply.error.message)
+  }
+  const created = (reply.result as { worktree?: Row } | null)?.worktree
+  const id = str(created?.id)
+  if (!id) {
+    throw new Error('The desktop did not say which workspace it created.')
+  }
+  return {
+    id,
+    repo: project.repo,
+    name: str(created?.displayName) ?? workspaceTitleForTask(task),
+    path: null,
+    isMain: false,
+    repoId: project.repoId
   }
 }

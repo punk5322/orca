@@ -11,3 +11,8 @@ export function voiceLinkRoute(url: string): VoiceLinkRoute | null {
   }
   return match[1]?.toLowerCase() === 'new-task' ? '/new-task' : '/voice-mode'
 }
+
+/** The Stop button on the lock screen card: orca-cc://hands-free-off. */
+export function isHandsFreeOffLink(url: string): boolean {
+  return /^orca(?:-cc)?:\/\/\/?hands-free-off\/?(?:[?#].*)?$/i.test(url.trim())
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { voiceLinkRoute } from './voice-links'
+import { isHandsFreeOffLink, voiceLinkRoute } from './voice-links'
 
 describe('voice links', () => {
   it('maps the new-task and voice-mode links', () => {
@@ -23,5 +23,14 @@ describe('voice links', () => {
     expect(voiceLinkRoute('orca://pair?code=abc')).toBeNull()
     expect(voiceLinkRoute('orca://new-task-extra')).toBeNull()
     expect(voiceLinkRoute('https://example.com/new-task')).toBeNull()
+  })
+})
+
+describe('the lock screen stop link', () => {
+  it('matches only the hands-free-off link', () => {
+    expect(isHandsFreeOffLink('orca-cc://hands-free-off')).toBe(true)
+    expect(isHandsFreeOffLink('orca://hands-free-off/')).toBe(true)
+    expect(isHandsFreeOffLink('orca-cc://new-task')).toBe(false)
+    expect(isHandsFreeOffLink('orca-cc://hands-free-offer')).toBe(false)
   })
 })
