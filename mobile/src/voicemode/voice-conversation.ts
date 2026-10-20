@@ -7,6 +7,14 @@ import { acquireAudio } from '../handsfree/audio-lease'
 import { nativeHandsFree } from '../handsfree/native-hands-free'
 import { ChatTracker } from './chat-tracker'
 import { setVoiceModeActive } from './voice-mode-state'
+import { isReadMore, moreOfReply, spokenReply } from './reply-speech'
+import {
+  approvalSpeech,
+  classifyDecision,
+  pickApprovalOptions,
+  type ApprovalPrompt
+} from './voice-approvals'
+import { requestStructuredAgentSessionMutation } from '../session/mobile-structured-agent-session-rpc'
 
 export type VoiceState = 'idle' | 'listening' | 'thinking' | 'speaking'
 
@@ -24,43 +32,18 @@ const END_PHRASE =
   /^(goodbye|good bye|end (the )?(conversation|chat|session)|that'?s all|stop listening|exit)\b/i
 const CANCEL_PHRASE = /^(cancel|never ?mind|nothing|no)\b/i
 const EMPTY_ROUNDS_BEFORE_PAUSE = 3
-const SPOKEN_MAX = 320
+const MAX_APPROVALS_PER_TURN = 8
 // Added once, to the first message, so replies come back short enough to listen to.
 const VOICE_STYLE_HINT =
   " (I'm talking to you by voice, so reply in a few short spoken sentences, without code blocks or lists unless I ask.)"
-
-// A reply read aloud: plain sentences up to a limit, with a pointer to the chat for the rest.
-export function spokenReply(text: string): string {
-  const hadCode = /```/.test(text)
-  const plain = text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/^[#>\-*\d.\s]+/gm, '')
-    .replace(/[`*_]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!plain) {
-    return hadCode ? 'I left some code in the chat.' : 'Done.'
-  }
-  let out = ''
-  for (const sentence of plain.match(/[^.!?]+[.!?]+(\s|$)/g) ?? [plain]) {
-    if ((out + sentence).length > SPOKEN_MAX) {
-      break
-    }
-    out += sentence
-  }
-  out = (out || plain.slice(0, SPOKEN_MAX)).trim()
-  if (hadCode) {
-    return `${out} I left the code in the chat.`
-  }
-  return out.length < plain.length ? `${out} The rest is in the chat.` : out
-}
 
 export class VoiceConversation {
   private running = false
   private abort = new AbortController()
   private release: () => Promise<void> = async () => {}
   private tracker: ChatTracker | null = null
+  // What of the last reply has not been read aloud yet, for "read more".
+  private unread: string[] = []
   private client: RpcClient | null = null
   private readonly acquisition: HostClientAcquisition = {}
 
@@ -125,6 +108,61 @@ export class VoiceConversation {
     await nativeHandsFree?.speak(text, interruptible)
   }
 
+  // Reads a permission request aloud and acts only on a clear "go ahead" (or a refusal). Anything
+  // else leaves the request waiting in the chat. Returns whether it was answered.
+  private async resolveApproval(
+    client: RpcClient,
+    tracker: ChatTracker,
+    prompt: ApprovalPrompt
+  ): Promise<boolean> {
+    const { allow, deny } = pickApprovalOptions(prompt.options)
+    if (!allow || !deny) {
+      this.callbacks.onNotice(`Needs you in the chat: ${prompt.title}`)
+      await this.say('This one needs you. Check the chat.')
+      return false
+    }
+    this.callbacks.onNotice(`Permission needed: ${prompt.title}`)
+    let ask = approvalSpeech(prompt)
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await this.say(ask)
+      this.callbacks.onState('listening')
+      const heard = await listenAndTranscribe(client)
+      if (!this.running) {
+        return false
+      }
+      const decision = classifyDecision(heard)
+      if (decision === 'unclear') {
+        ask = 'Say go ahead to allow it, or hold off to refuse.'
+        continue
+      }
+      if (tracker.fence === null) {
+        await this.say("I can't answer that right now. Check the chat.")
+        return false
+      }
+      const result = await requestStructuredAgentSessionMutation({
+        client,
+        method: 'agentSession.respondToApproval',
+        fingerprintMethod: 'agentSession.respondTo:approval',
+        sessionId: this.sessionId,
+        expectedRuntimeFence: tracker.fence,
+        fields: {
+          itemId: prompt.itemId,
+          expectedRevision: prompt.revision,
+          optionId: decision === 'allow' ? allow.id : deny.id
+        }
+      })
+      if (result.status !== 'accepted') {
+        await this.say("That didn't go through. Check the chat.")
+        return false
+      }
+      this.callbacks.onNotice(`${decision === 'allow' ? 'Allowed' : 'Refused'}: ${prompt.title}`)
+      await this.say(decision === 'allow' ? 'Going ahead.' : 'Held off.')
+      return true
+    }
+    await this.say("I'll leave it for you in the chat.")
+    return false
+  }
+
   private async loop(): Promise<void> {
     const client = this.client
     const tracker = this.tracker
@@ -163,6 +201,12 @@ export class VoiceConversation {
         continue
       }
       emptyRounds = 0
+      if (!useReadyMade && isReadMore(heard)) {
+        const more = moreOfReply(this.unread)
+        this.unread = more.rest
+        await this.say(more.spoken, true)
+        continue
+      }
       if (!useReadyMade && END_PHRASE.test(heard)) {
         await this.say('Goodbye.')
         await this.stop()
@@ -182,18 +226,33 @@ export class VoiceConversation {
           firstMessage ? heard + VOICE_STYLE_HINT : heard
         )
         firstMessage = false
-        const reply = await tracker.reply(after, this.abort.signal)
+        let reply = await tracker.reply(after, this.abort.signal)
+        // A permission request pauses the turn; once answered, wait for the turn to carry on.
+        for (
+          let approvals = 0;
+          reply.kind === 'approval' && this.running && approvals < MAX_APPROVALS_PER_TURN;
+          approvals += 1
+        ) {
+          if (!(await this.resolveApproval(client, tracker, reply.prompt))) {
+            break
+          }
+          this.callbacks.onState('thinking')
+          reply = await tracker.reply(after, this.abort.signal)
+        }
         if (!this.running) {
           return
         }
         if (reply.kind === 'text') {
           this.callbacks.onReplyText(reply.text)
+          const { spoken, rest } = spokenReply(reply.text)
+          this.unread = rest
           // Interruptible: talking over it, or a play/pause press, cuts in and becomes the reply.
-          await this.say(spokenReply(reply.text), true)
-        } else if (reply.kind === 'needs-you') {
-          const what = reply.what === 'approval' ? 'needs your approval' : 'has a question'
-          this.callbacks.onNotice(`The agent ${what}: ${reply.detail}`)
-          await this.say(`The agent ${what}. Check the chat.`)
+          await this.say(spoken, true)
+        } else if (reply.kind === 'approval') {
+          // Left unanswered above; it waits in the chat.
+        } else if (reply.kind === 'question') {
+          this.callbacks.onNotice(`The agent has a question: ${reply.detail}`)
+          await this.say('The agent has a question. Check the chat.')
         } else {
           await this.say("I didn't get a reply.")
         }

@@ -11,6 +11,8 @@ export type InstalledVoice = {
 }
 
 type NativeHandsFree = {
+  getRate: () => Promise<number>
+  setRate: (value: number) => Promise<void>
   voices: () => Promise<InstalledVoice[]>
   currentVoice: () => Promise<string | null>
   setVoice: (id: string | null) => Promise<void>

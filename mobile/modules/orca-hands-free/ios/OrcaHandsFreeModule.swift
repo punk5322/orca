@@ -21,13 +21,15 @@ public class OrcaHandsFreeModule: Module {
         AVAudioSession.sharedInstance().requestRecordPermission { promise.resolve($0) }
       }
     }
+    AsyncFunction("getRate") { () -> Double in HandsFreeAudio.savedRate() }
+    AsyncFunction("setRate") { (value: Double) in HandsFreeAudio.saveRate(value) }
     AsyncFunction("voices") { () -> [[String: String]] in HandsFreeAudio.voiceList() }
     AsyncFunction("currentVoice") { () -> String? in HandsFreeAudio.savedVoiceId() }
     AsyncFunction("setVoice") { (id: String?) in HandsFreeAudio.saveVoice(id) }
     AsyncFunction("preview") { (id: String, promise: Promise) in
       HandsFreeAudio.shared.speak(
         "Good evening. The build has succeeded. What would you like to do next?",
-        interruptible: false, voiceId: id
+        interruptible: false, voiceId: id.isEmpty ? nil : id
       ) { promise.resolve() }
     }
     AsyncFunction("start") { () throws in try HandsFreeAudio.shared.start() }
@@ -217,7 +219,9 @@ final class HandsFreeAudio: NSObject, AVSpeechSynthesizerDelegate {
       if monitor { try? self.ensureTap() }
       let utterance = AVSpeechUtterance(string: text)
       utterance.voice = voiceId.flatMap { AVSpeechSynthesisVoice(identifier: $0) } ?? Self.bestVoice()
-      utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 1.05
+      utterance.rate = min(
+        AVSpeechUtteranceMaximumSpeechRate,
+        AVSpeechUtteranceDefaultSpeechRate * Float(Self.savedRate()))
       self.synthesizer.speak(utterance)
       // Why: if no audio route ever plays the utterance the delegate never fires; do not hang JS.
       DispatchQueue.main.asyncAfter(deadline: .now() + 45) { [weak self] in self?.finishSpeaking() }
@@ -253,6 +257,17 @@ final class HandsFreeAudio: NSObject, AVSpeechSynthesizerDelegate {
   // free downloads in iOS Settings (Accessibility > Spoken Content > Voices) and sound far more
   // natural, so use the best installed one in the user's language, skipping novelty voices.
   private static let voiceKey = "orca.handsfree.voice"
+  private static let rateKey = "orca.handsfree.rate"
+
+  /// Speech speed as a multiple of the system's default rate.
+  static func savedRate() -> Double {
+    let stored = UserDefaults.standard.double(forKey: rateKey)
+    return stored > 0 ? min(max(stored, 0.7), 1.7) : 1.05
+  }
+
+  static func saveRate(_ value: Double) {
+    UserDefaults.standard.set(min(max(value, 0.7), 1.7), forKey: rateKey)
+  }
 
   static func savedVoiceId() -> String? { UserDefaults.standard.string(forKey: voiceKey) }
 

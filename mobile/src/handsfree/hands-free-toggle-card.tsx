@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
-import { Check, ChevronDown, ChevronRight, Headphones, Volume2 } from 'lucide-react-native'
+import { Check, ChevronDown, ChevronRight, Gauge, Headphones, Volume2 } from 'lucide-react-native'
 import { colors, spacing, typography } from '../theme/mobile-theme'
 import { nativeHandsFree, type InstalledVoice } from './native-hands-free'
 import { setHandsFreeActive } from './hands-free-state'
@@ -15,6 +15,13 @@ const ACCENTS: Record<string, string> = {
   'en-ZA': 'South African'
 }
 
+const SPEEDS = [
+  { label: 'Slow', value: 0.9 },
+  { label: 'Normal', value: 1.05 },
+  { label: 'Fast', value: 1.3 },
+  { label: 'Faster', value: 1.55 }
+]
+
 function detail(voice: InstalledVoice): string {
   return `${ACCENTS[voice.language] ?? voice.language} · ${voice.quality}`
 }
@@ -25,10 +32,12 @@ export function HandsFreeToggleCard() {
   const [open, setOpen] = useState(false)
   const [voices, setVoices] = useState<InstalledVoice[]>([])
   const [selected, setSelected] = useState<string | null>(null)
+  const [rate, setRate] = useState(1.05)
 
   useEffect(() => {
     void nativeHandsFree?.voices().then(setVoices)
     void nativeHandsFree?.currentVoice().then(setSelected)
+    void nativeHandsFree?.getRate().then(setRate)
   }, [])
 
   if (!nativeHandsFree) {
@@ -62,6 +71,29 @@ export function HandsFreeToggleCard() {
             {current ? current.name : 'Automatic'}
           </Text>
           <Chevron size={16} color={colors.textMuted} />
+        </Pressable>
+        <View style={styles.separator} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Speech speed"
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          onPress={() => {
+            // Tap to step through the speeds, and hear the new one.
+            const index = SPEEDS.findIndex((speed) => Math.abs(speed.value - rate) < 0.05)
+            const next = SPEEDS[(index + 1) % SPEEDS.length] ?? SPEEDS[1]
+            if (next) {
+              setRate(next.value)
+              void nativeHandsFree
+                ?.setRate(next.value)
+                .then(() => nativeHandsFree?.preview(selected ?? ''))
+            }
+          }}
+        >
+          <Gauge size={16} color={colors.textSecondary} />
+          <Text style={styles.rowLabel}>Speed</Text>
+          <Text style={styles.value}>
+            {SPEEDS.find((speed) => Math.abs(speed.value - rate) < 0.05)?.label ?? 'Custom'}
+          </Text>
         </Pressable>
         {open ? (
           <>

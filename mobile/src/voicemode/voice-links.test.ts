@@ -7,6 +7,11 @@ describe('voice links', () => {
     expect(voiceLinkRoute('orca://voice-mode')).toBe('/voice-mode')
   })
 
+  it('answers to the fork scheme as well as the original', () => {
+    expect(voiceLinkRoute('orca-cc://new-task')).toBe('/new-task')
+    expect(voiceLinkRoute('orca-cc://voice-mode')).toBe('/voice-mode')
+  })
+
   it('tolerates a triple slash, trailing slash, query and case', () => {
     expect(voiceLinkRoute('orca:///new-task')).toBe('/new-task')
     expect(voiceLinkRoute('orca://new-task/')).toBe('/new-task')

@@ -4,10 +4,12 @@ import type {
   AgentJournalRenderItem
 } from '../../../src/shared/agent-session-journal-types'
 import { readAgentJournalTurn } from '../../../src/shared/agent-session-turn-record'
+import type { ApprovalPrompt } from './voice-approvals'
 
 export type ChatReply =
   | { kind: 'text'; text: string }
-  | { kind: 'needs-you'; what: 'approval' | 'question'; detail: string }
+  | { kind: 'approval'; prompt: ApprovalPrompt }
+  | { kind: 'question'; detail: string }
   | { kind: 'none' }
 
 type Frame = {
@@ -40,6 +42,8 @@ export class ChatTracker {
   private readonly wakers = new Set<() => void>()
   private closeStream: () => void = () => {}
   readonly ready: Promise<void>
+  /** The chat's latest ownership fence, which a response to a prompt must carry. */
+  fence: number | null = null
 
   constructor(client: RpcClient, sessionId: string) {
     this.ready = new Promise<void>((resolve, reject) => {
@@ -74,6 +78,9 @@ export class ChatTracker {
   }
 
   private apply(frame: Frame): void {
+    if (typeof frame.fence === 'number') {
+      this.fence = frame.fence
+    }
     const replace = frame.type === 'snapshot' || frame.type === 'reset'
     const source = replace ? frame.page : frame.type === 'batch' ? frame.batch : undefined
     if (!source) {
@@ -97,15 +104,20 @@ export class ChatTracker {
     const fresh = [...this.items.values()].filter((item) => item.sequence > after).sort(order)
     for (const item of fresh) {
       const body = item.body
-      if (
-        (body.kind === 'approval' || body.kind === 'question') &&
-        body.resolution.state === 'pending'
-      ) {
+      if (body.kind === 'approval' && body.resolution.state === 'pending') {
         return {
-          kind: 'needs-you',
-          what: body.kind,
-          detail: body.kind === 'approval' ? body.title : body.question
+          kind: 'approval',
+          prompt: {
+            itemId: item.itemId,
+            revision: item.revision,
+            title: body.title,
+            detail: body.detail,
+            options: body.options.map((option) => ({ id: option.id, label: option.label }))
+          }
         }
+      }
+      if (body.kind === 'question' && body.resolution.state === 'pending') {
+        return { kind: 'question', detail: body.question }
       }
     }
     const turns = fresh.flatMap((item) => {
@@ -144,7 +156,7 @@ export class ChatTracker {
         settledAt = null
       } else if (state === 'waiting') {
         settledAt = null
-      } else if (state.kind === 'needs-you') {
+      } else if (state.kind === 'approval' || state.kind === 'question') {
         return state
       } else {
         // Let the final batch land before reading the finished reply.
