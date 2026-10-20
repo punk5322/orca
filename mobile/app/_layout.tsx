@@ -28,6 +28,7 @@ import { appUpdateChecker } from '../src/app-update/app-update-runtime'
 import { SideSafeArea } from '../src/layout/side-safe-area'
 import { useWatchBridge } from '../src/watch/use-watch-bridge'
 import { useHandsFree } from '../src/handsfree/use-hands-free'
+import { voiceLinkRoute } from '../src/voicemode/voice-links'
 
 // Why: keeps the native splash screen visible until the React tree is mounted
 // and ready to render. Without this the user sees a blank white/black frame
@@ -97,6 +98,12 @@ export default function RootLayout() {
         // `orca://pair` route underneath this screen; replacing keeps cancel
         // and edge-back from revealing the router error page.
         router.replace({ pathname: '/pair-confirm', params: { code } })
+        return
+      }
+      // orca://new-task and orca://voice-mode, from a Siri or Shortcuts launch.
+      const voiceRoute = voiceLinkRoute(url)
+      if (voiceRoute) {
+        router.replace(voiceRoute)
       }
     }
 
@@ -242,6 +249,7 @@ export default function RootLayout() {
             />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
             <Stack.Screen name="voice-mode" options={{ headerShown: false }} />
+            <Stack.Screen name="new-task" options={{ headerShown: false }} />
             <Stack.Screen name="terminal-settings" options={{ headerShown: false }} />
             <Stack.Screen name="native-chat-settings" options={{ headerShown: false }} />
             <Stack.Screen name="browser-settings" options={{ headerShown: false }} />

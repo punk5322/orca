@@ -3,5 +3,7 @@ import { VoiceModeScreen } from '../src/voicemode/voice-mode-screen'
 
 export default function VoiceModeRoute() {
   const router = useRouter()
-  return <VoiceModeScreen onExit={() => router.back()} />
+  return (
+    <VoiceModeScreen onExit={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+  )
 }

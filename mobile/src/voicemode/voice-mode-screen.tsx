@@ -41,7 +41,14 @@ const STATE_LABEL: Record<VoiceState, string> = {
   speaking: 'Speaking. Talk over it to interrupt.'
 }
 
-export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
+export function VoiceModeScreen({
+  onExit,
+  autoStartTask = false
+}: {
+  onExit: () => void
+  /** Begin the new-task flow as soon as the projects load, for a Siri or Shortcut launch. */
+  autoStartTask?: boolean
+}) {
   const insets = useSafeAreaInsets()
   const ctx = useRpcClientContext()
   const ctxRef = useRef(ctx)
@@ -96,6 +103,16 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     void load(async (client) => setProjects(await listProjects(client)))
   }, [load])
+
+  // Why: a launch from Siri wants to be listening at once, with no tap, so the new-task flow starts
+  // itself the first time the project list is ready.
+  const autoStarted = useRef(false)
+  useEffect(() => {
+    if (autoStartTask && !autoStarted.current && projects.length > 0) {
+      autoStarted.current = true
+      void startTaskRef.current()
+    }
+  }, [autoStartTask, projects])
 
   const stopConversation = useCallback(async () => {
     await conversation.current?.stop()
@@ -246,6 +263,9 @@ export function VoiceModeScreen({ onExit }: { onExit: () => void }) {
       }
     }
   }
+
+  const startTaskRef = useRef(startTask)
+  startTaskRef.current = startTask
 
   const cancelTask = async () => {
     taskAbort.current?.abort()
